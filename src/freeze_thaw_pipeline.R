@@ -1,5 +1,5 @@
 # ============================================================
-# uniform_pipeline.R  —  Freeze–Thaw Cytokine Analysis (FINAL)
+# Freeze-Thaw Cytokine Analysis Pipeline
 # ============================================================
 
 suppressPackageStartupMessages({
@@ -13,7 +13,7 @@ suppressPackageStartupMessages({
 })
 
 # --------------------------
-# Output folders - FRESH START
+# Output folders
 # --------------------------
 cat("Creating output directories...\n")
 dir.create("freeze_thaw_analysis", recursive = TRUE, showWarnings = FALSE)
@@ -22,15 +22,13 @@ dir.create("freeze_thaw_analysis/pca_plots", recursive = TRUE, showWarnings = FA
 dir.create("freeze_thaw_analysis/heatmaps", recursive = TRUE, showWarnings = FALSE)
 dir.create("freeze_thaw_analysis/summary_tables", recursive = TRUE, showWarnings = FALSE)
 
-# Check if directories were created
+# Basic path check
 cat("Checking directories:\n")
 cat("  freeze_thaw_analysis/ exists:", dir.exists("freeze_thaw_analysis"), "\n")
 cat("  Current working directory:", getwd(), "\n")
 
 # --------------------------
-# 1) Load & unify data (Panel*_vert_clean.csv → all_data)
-#    - robust path finder
-#    - harmonize column names
+# 1) Load and combine panel data
 # --------------------------
 first_existing <- function(paths) {
   for (p in paths) if (file.exists(p)) return(p)
@@ -81,16 +79,16 @@ all_data <- bind_rows(panel1, panel2, panel3) %>%
   )
 
 # --------------------------
-# 2) ALWAYS-INTERACTION analysis per cytokine
+# 2) Matrix-by-cycle model for each cytokine
 # --------------------------
-analyze_one_protein_uniform <- function(protein_name, data, show_details = FALSE) {
+analyze_one_cytokine <- function(protein_name, data, show_details = FALSE) {
   d <- data %>% filter(Protein_Name == protein_name) %>% droplevels()
   if (nrow(d) < 12) {
     return(tibble(Protein_Name = protein_name, Status = "Not_Enough_Data"))
   }
   
   tryCatch({
-    # Likelihood-ratio test for interaction (ML for model comparison)
+    # Compare models with and without the matrix-by-cycle interaction
     main_ml  <- lme(Log_Protein_Amount ~ Matrix + Freeze_Thaw_Cycle,
                     random = ~1|Donor_ID, data = d, method = "ML")
     inter_ml <- lme(Log_Protein_Amount ~ Matrix * Freeze_Thaw_Cycle,
@@ -98,10 +96,10 @@ analyze_one_protein_uniform <- function(protein_name, data, show_details = FALSE
     a <- anova(main_ml, inter_ml)
     interaction_p <- a$`p-value`[2]
     
-    # Refit with REML for estimates
+    # Refit the interaction model with REML for slope estimates
     inter_reml <- update(inter_ml, method = "REML")
     
-    # Per-matrix slopes from the interaction model (robust widen)
+    # Estimate freeze-thaw slope within each matrix
     tr <- emtrends(inter_reml, ~ Matrix, var = "Freeze_Thaw_Cycle")
     tr_sum <- summary(tr, infer = c(TRUE, TRUE)) %>%
       as_tibble() %>%
@@ -126,7 +124,7 @@ analyze_one_protein_uniform <- function(protein_name, data, show_details = FALSE
         values_fn   = dplyr::first
       )
     
-    # Overall percent change (Cycle 1 → 4)
+    # Overall change from cycle 1 to cycle 4
     c1 <- mean(d$Log_Protein_Amount[d$Freeze_Thaw_Cycle == 1], na.rm = TRUE)
     c4 <- mean(d$Log_Protein_Amount[d$Freeze_Thaw_Cycle == 4], na.rm = TRUE)
     pc <- { o1 <- 10^c1 - 1; o4 <- 10^c4 - 1; if (is.finite(o1) && o1 > 0) 100*(o4-o1)/o1 else NA_real_ }
@@ -146,19 +144,19 @@ analyze_one_protein_uniform <- function(protein_name, data, show_details = FALSE
 }
 
 # --------------------------
-# 3) Run across all proteins
+# 3) Run model across cytokines
 # --------------------------
 proteins <- sort(unique(all_data$Protein_Name))
-cat("Analyzing", length(proteins), "proteins...\n")
+cat("Analyzing", length(proteins), "cytokines...\n")
 res_list <- lapply(seq_along(proteins), function(i){
   if (i %% 10 == 0) cat("Progress:", i, "of", length(proteins), "\n")
-  analyze_one_protein_uniform(proteins[i], all_data, show_details = FALSE)
+  analyze_one_cytokine(proteins[i], all_data, show_details = FALSE)
 })
 uniform_results <- bind_rows(res_list) %>% filter(Status == "Success")
-cat("Successfully analyzed:", nrow(uniform_results), "proteins\n")
+cat("Successfully analyzed:", nrow(uniform_results), "cytokines\n")
 
 # --------------------------
-# 4) Mentor summary table (your rules)
+# 4) Summary table
 # --------------------------
 make_mentor_summary <- function(uniform_results) {
   uniform_results %>%
@@ -197,7 +195,7 @@ cat("Writing mentor summary to:", file.path(getwd(), "freeze_thaw_analysis/summa
 write_csv(mentor_summary, "freeze_thaw_analysis/summary_tables/Uniform_Summary_ForMentor.csv")
 
 # --------------------------
-# 5) Matrix-difference color table (sig interactions → farthest-from-mean slope)
+# 5) Identify matrix with strongest interaction signal
 # --------------------------
 make_matrix_diff_color_table <- function(uniform_results) {
   uniform_results %>%
@@ -226,8 +224,7 @@ cat("Writing matrix difference colors to:", file.path(getwd(), "freeze_thaw_anal
 write_csv(matrix_diff_colors, "freeze_thaw_analysis/summary_tables/Matrix_Difference_ColorTable.csv")
 
 # --------------------------
-# 6) Plotting (uniform; no CI; white header; "Matrix Interaction p")
-#     EDIT: y-axis label changed to "log10 MFI"
+# 6) Per-cytokine plots
 # --------------------------
 create_uniform_plot <- function(protein_name, data, results_df) {
   d <- data %>% filter(Protein_Name == protein_name) %>% droplevels()
@@ -269,7 +266,7 @@ create_uniform_plot <- function(protein_name, data, results_df) {
       scale_x_continuous(breaks = 1:4, labels = 1:4) +
       scale_y_continuous(limits = c(y_min, y_max)) +
       labs(title = m, subtitle = get_lab(m),
-           x = "Freeze–Thaw Cycles", y = "log10 MFI") +   # <<< EDIT HERE
+           x = "Freeze-Thaw Cycles", y = "log10 MFI") +
       theme_bw(base_size = 18) +
       theme(
         plot.title = element_text(face="bold", size = 20),
@@ -285,22 +282,22 @@ create_uniform_plot <- function(protein_name, data, results_df) {
       )
   })
   
-  # Create title band properly using cowplot functions
+  # Figure title band
   title_grob <- ggdraw() +
     draw_label(top_title, fontface="bold", size=20, color="white", y=0.7) +
     draw_label(top_subtitle, y = 0.3, size=14, color="white") +
     theme(plot.background = element_rect(fill = "gray10", color = NA))
   
-  # Create the grid of plots
+  # Matrix-specific panels
   grid <- plot_grid(plotlist = jar_plots, ncol = length(jar_plots))
   
-  # Combine title and grid
+  # Combine title and panels
   final_plot <- plot_grid(title_grob, grid, ncol = 1, rel_heights = c(0.12, 0.88))
   
   return(final_plot)
 }
 
-cat("Creating plots…\n")
+cat("Creating plots...\n")
 for (i in seq_len(nrow(uniform_results))) {
   pr <- uniform_results$Protein_Name[i]
   p  <- create_uniform_plot(pr, all_data, uniform_results)
@@ -309,31 +306,31 @@ for (i in seq_len(nrow(uniform_results))) {
                      paste0(gsub("[^A-Za-z0-9_-]", "_", pr), "_UNIFORM.png")),
            p, width = 15, height = 8.5, dpi = 300)
   }
-  if (i %% 20 == 0) cat("  …", i, "of", nrow(uniform_results), "plots saved\n")
+  if (i %% 20 == 0) cat("  ...", i, "of", nrow(uniform_results), "plots saved\n")
 }
 
 # --------------------------
-# 7) ROBUST PCA with rounded, labeled cluster outlines (ggforce hulls)
+# 7) PCA of cytokine profiles
 # --------------------------
-prepare_pca_data_robust <- function(data) {
-  cat("\n=== PCA Data Preparation ===\n")
+prepare_pca_data <- function(data) {
+  cat("\nPreparing PCA data...\n")
   
-  # Create wide format for PCA
+  # Convert long cytokine measurements to a sample-by-cytokine matrix
   wide_data <- data %>%
     select(Aliquot, Donor_ID, Matrix, Freeze_Thaw_Cycle, Protein_Name, Log_Protein_Amount) %>%
-    # Average duplicate measurements per sample-protein
+    # Average duplicate sample-cytokine measurements
     group_by(Aliquot, Donor_ID, Matrix, Freeze_Thaw_Cycle, Protein_Name) %>%
     summarise(Log_Protein_Amount = mean(Log_Protein_Amount, na.rm = TRUE), .groups = "drop") %>%
-    # Convert to wide format
+    # Wide format: one row per sample, one column per cytokine
     pivot_wider(names_from = Protein_Name, values_from = Log_Protein_Amount, values_fill = NA)
   
   cat("Wide data dimensions:", nrow(wide_data), "samples x", ncol(wide_data)-4, "proteins\n")
   
-  # Separate metadata and protein data
+  # Separate sample metadata from cytokine values
   meta <- wide_data %>% select(Aliquot, Donor_ID, Matrix, Freeze_Thaw_Cycle)
   protein_data <- wide_data %>% select(-Aliquot, -Donor_ID, -Matrix, -Freeze_Thaw_Cycle)
   
-  # Step 1: Remove proteins with too much missing data (>75% missing)
+  # Remove cytokines with high missingness
   missing_prop <- colMeans(is.na(protein_data))
   keep_proteins <- missing_prop <= 0.75
   protein_data <- protein_data[, keep_proteins, drop = FALSE]
@@ -344,7 +341,7 @@ prepare_pca_data_robust <- function(data) {
     stop("ERROR: No proteins have sufficient data (all have >75% missing values)")
   }
   
-  # Step 2: Remove samples with too much missing data (>50% missing)
+  # Remove samples with high missingness
   sample_missing_prop <- rowMeans(is.na(protein_data))
   keep_samples <- sample_missing_prop <= 0.5
   protein_data <- protein_data[keep_samples, , drop = FALSE]
@@ -356,7 +353,7 @@ prepare_pca_data_robust <- function(data) {
     stop("ERROR: No samples have sufficient data")
   }
   
-  # Step 3: Impute remaining missing values with protein means
+  # Mean-impute remaining missing values by cytokine
   for (i in 1:ncol(protein_data)) {
     col_mean <- mean(protein_data[[i]], na.rm = TRUE)
     if (!is.na(col_mean)) {
@@ -364,7 +361,7 @@ prepare_pca_data_robust <- function(data) {
     }
   }
   
-  # Step 4: Remove constant proteins (zero variance)
+  # Remove cytokines with near-zero variance
   protein_vars <- apply(protein_data, 2, var, na.rm = TRUE)
   keep_variable <- protein_vars > 1e-10 & !is.na(protein_vars)
   protein_data <- protein_data[, keep_variable, drop = FALSE]
@@ -375,10 +372,10 @@ prepare_pca_data_robust <- function(data) {
     stop("ERROR: Need at least 2 variable proteins for PCA")
   }
   
-  # Step 5: Scale the data
+  # Scale cytokine features before PCA
   scaled_data <- scale(protein_data)
   
-  # Check for any remaining issues
+  # Replace any non-finite scaled values
   if (any(!is.finite(scaled_data))) {
     cat("WARNING: Non-finite values after scaling, replacing with 0\n")
     scaled_data[!is.finite(scaled_data)] <- 0
@@ -389,14 +386,14 @@ prepare_pca_data_robust <- function(data) {
   return(list(X = scaled_data, meta = meta, protein_names = colnames(scaled_data)))
 }
 
-cat("Creating PCA (ggforce hulls)…\n")
-pca_data <- prepare_pca_data_robust(all_data)
+cat("Creating PCA plots...\n")
+pca_data <- prepare_pca_data(all_data)
 pca_fit <- prcomp(pca_data$X, center = FALSE, scale. = FALSE)
 pve <- (pca_fit$sdev^2) / sum(pca_fit$sdev^2)
 pc_lab <- function(k){ paste0("PC", k, " (", sprintf("%.1f", 100*pve[k]), "%)") }
 
-# Create PCA scores with metadata
-pca_scores <- as_tibble(pca_fit$x[, 1:10]) %>%  # Keep first 10 PCs
+# PCA scores with sample metadata
+pca_scores <- as_tibble(pca_fit$x[, 1:10]) %>%  keep first 10 PCs
   bind_cols(pca_data$meta) %>%
   mutate(
     Freeze_Thaw_Cycle = factor(Freeze_Thaw_Cycle, levels = 1:4, labels = paste("Cycle", 1:4)),
@@ -404,17 +401,17 @@ pca_scores <- as_tibble(pca_fit$x[, 1:10]) %>%  # Keep first 10 PCs
     Matrix = factor(Matrix, levels = c("PL-EDTA", "PL-HE", "SE"))
   )
 
-# Add sample counts for hulls
+# Add group counts for hull labels
 pca_scores_with_counts <- pca_scores %>%
   group_by(Freeze_Thaw_Cycle, Matrix) %>%
   mutate(n_group = n(),
          hull_label = paste0(Matrix, " (n=", n_group, ")")) %>%
   ungroup()
 
-# Main PCA plot - Multi-panel layout like the example
+# Multi-panel PCA plot
 create_multipanel_pca <- function(pca_scores, pve) {
   
-  # Helper function for PC labels
+  # Axis labels with variance explained
   pc_label <- function(pc_num) {
     paste0("PC", pc_num, " (", sprintf("%.1f%%", 100 * pve[pc_num]), " variance)")
   }
@@ -488,18 +485,18 @@ create_multipanel_pca <- function(pca_scores, pve) {
     ) +
     guides(color = guide_legend(override.aes = list(size = 4)))
   
-  # Combine into 3-panel layout
+  # Combine panels
   plot_grid(p1, p2, p3, ncol = 1, align = "v", axis = "lr")
 }
 
-# Create the multi-panel PCA plot
+# Save PCA plots
 multipanel_pca <- create_multipanel_pca(pca_scores, pve)
 
 # Save the clean multi-panel plot
 ggsave("freeze_thaw_analysis/pca_plots/PCA_MultiPanel_Analysis.png",
        multipanel_pca, width = 8, height = 16, dpi = 300)
 
-# Also save the original hull-based plot for comparison
+# Faceted PCA with group outlines
 p_pca <- ggplot(pca_scores_with_counts, aes(PC1, PC2)) +
   ggforce::geom_mark_hull(
     aes(group = interaction(Freeze_Thaw_Cycle, Matrix),
@@ -531,7 +528,7 @@ ggsave("freeze_thaw_analysis/pca_plots/PCA_Hull_Faceted.png",
 cat("PCA plots saved successfully.\n")
 
 # --------------------------
-# 8) Heatmap (row z-scored; columns = Matrix×Cycle means)
+# 8) Heatmap of matrix-by-cycle cytokine means
 # --------------------------
 make_matrix_cycle_heat <- function(data){
   cat("Creating heatmap data...\n")
@@ -564,7 +561,7 @@ make_matrix_cycle_heat <- function(data){
   return(mat_z)
 }
 
-cat("Creating heatmap…\n")
+cat("Creating heatmap...\n")
 mat_z <- make_matrix_cycle_heat(all_data)
 
 heat_df <- as_tibble(mat_z, rownames = "Protein_Name") %>%
@@ -589,7 +586,7 @@ ggsave("freeze_thaw_analysis/heatmaps/Cytokines_Heatmap_MatrixCycle.png",
        p_heat, width = 10, height = 14, dpi = 300)
 
 # --------------------------
-# 9) Create summary tables by freeze-thaw effect categories
+# 9) Create tables by freeze-thaw effect category
 # --------------------------
 create_effect_category_tables <- function(mentor_summary) {
   cat("Creating effect category tables...\n")
@@ -669,20 +666,20 @@ create_effect_category_tables <- function(mentor_summary) {
 effect_tables <- create_effect_category_tables(mentor_summary)
 
 # --------------------------
-# 10) Save full results table too
+# 10) Save full results table
 # --------------------------
 write_csv(uniform_results, "freeze_thaw_analysis/summary_tables/Uniform_Interaction_Results.csv")
 cat("Writing full results to:", file.path(getwd(), "freeze_thaw_analysis/summary_tables/Uniform_Interaction_Results.csv"), "\n")
 
-# List all files created
+# Print output files
 cat("\n=== FILES CREATED ===\n")
 result_files <- list.files("freeze_thaw_analysis", recursive = TRUE, full.names = TRUE)
 for(f in result_files) {
-  cat("✓", f, "\n")
+  cat("-", f, "\n")
 }
 
-cat("\nAll done ✅\n",
-    "Files written to freeze_thaw_analysis/ …\n",
+cat("\nAnalysis complete.\n",
+    "Files written to freeze_thaw_analysis/ ...\n",
     " • summary_tables/Uniform_Interaction_Results.csv\n",
     " • summary_tables/Uniform_Summary_ForMentor.csv\n",
     " • summary_tables/Matrix_Difference_ColorTable.csv\n",
