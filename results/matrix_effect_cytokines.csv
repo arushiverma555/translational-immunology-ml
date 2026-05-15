@@ -1,0 +1,16 @@
+Analyte_Name,Matrix Interaction P Value,Percent_Change,PL-EDTA Effect,PL-EDTA Slope,PL-HE Effect,PL-HE Slope,SE Effect,SE Slope
+ENA-78/CXCL5/LIX,0.013,43.191,Increasing,0.087,Increasing,0.074,Decreasing,-0.014
+EOTAXIN3/CCL26,0.013,-11.288,Decreasing,-0.05,Increasing,0.012,Decreasing,-0.005
+FLT3L,0.05,-19.277,Decreasing,-0.018,Decreasing,-0.019,Decreasing,-0.049
+FRACTALKINE/CX3CL1,0.001,-9.949,Decreasing,-0.001,Decreasing,-0.047,Increasing,0.003
+IFNG,0.015,-11.206,Decreasing,-0.006,Decreasing,-0.022,Decreasing,-0.023
+IL10,0.015,-14.238,Decreasing,-0.003,Decreasing,-0.047,Decreasing,-0.017
+IL33/NFHEV(MATURE),0.028,-2.005,Decreasing,-0.026,Increasing,0.031,Decreasing,-0.023
+IL5,0.014,-8.177,Increasing,0.008,Decreasing,-0.035,Decreasing,-0.01
+IL6,0.003,-7.447,Decreasing,-0.003,Decreasing,-0.032,Decreasing,-0.002
+MDC/CCL22,0.005,0.198,Increasing,0.008,Decreasing,-0.015,Increasing,0.003
+PDGF-AA/AB,0.005,16.128,Increasing,0.035,Increasing,0.032,Decreasing,-0.003
+SDF1A+B/CXCL12,0.01,3.553,Decreasing,-0.06,Increasing,0.107,Decreasing,-0.015
+TNFB/LYMPHOTOXINA,0.024,-7.574,Increasing,0.011,Decreasing,-0.03,Decreasing,-0.015
+TPO,0.019,-4.851,Decreasing,-0.02,Increasing,0.018,Decreasing,-0.02
+TRAIL/TNFSF10,                                  <0.001,7.21,Decreasing,-0.008,Increasing,0.04,Decreasing,-0.005
