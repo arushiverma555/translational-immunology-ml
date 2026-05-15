@@ -1,57 +1,61 @@
-# Matrix Prediction Model
-# Exploratory ML model to classify biological matrix type from cytokine profiles
+# Matrix Prediction Random Forest Model
+# Translational Immunology ML Project
 
 library(tidyverse)
 library(randomForest)
 library(caret)
+library(janitor)
 
-# Load processed cytokine data
-panel1 <- read_csv("data/Panel1_vert_clean.csv", show_col_types = FALSE)
-panel2 <- read_csv("data/Panel2_vert_clean.csv", show_col_types = FALSE)
-panel3 <- read_csv("data/Panel3_vert_clean.csv", show_col_types = FALSE)
+# Load cleaned cytokine datasets
+panel1 <- read_csv("data/data/Panel1_vert_clean.csv", show_col_types = FALSE)
+panel2 <- read_csv("data/data/Panel2_vert_clean.csv", show_col_types = FALSE)
+panel3 <- read_csv("data/data/Panel3_vert_clean.csv", show_col_types = FALSE)
 
-all_data <- bind_rows(panel1, panel2, panel3) %>%
-  rename_with(~ str_replace_all(., "\\s+", "_")) %>%
-  rename(
-    Protein_Name = any_of(c("Protein_Name", "Analyte")),
-    Cytokine_Concentration = any_of(c("Cytokine_Concentration", "Concentration", "Value")),
-    Freeze_Thaw_Cycle = any_of(c("Freeze_Thaw_Cycle", "Freeze_Thaw"))
-  ) %>%
+# Combine all panels
+all_data <- bind_rows(panel1, panel2, panel3)
+
+# Check column names
+print(colnames(all_data))
+
+# Keep relevant columns
+all_data <- all_data %>%
+  select(
+    Donor_ID,
+    Matrix,
+    Freeze_Thaw,
+    Analyte,
+    Cytokine_Concentration
+  )
+
+# Create log-transformed concentration values
+all_data <- all_data %>%
   mutate(
-    Matrix = as.factor(Matrix),
-    Donor_ID = as.factor(Donor_ID),
-    Freeze_Thaw_Cycle = as.factor(Freeze_Thaw_Cycle),
-    Log_Concentration = log10(as.numeric(Cytokine_Concentration) + 1)
+    Log_Concentration = log10(Cytokine_Concentration + 1)
   )
 
-# Convert from long format to wide format:
-# each sample = one row, each cytokine = one feature
+# Convert long-format cytokine data into wide-format ML table
 wide_data <- all_data %>%
-  group_by(Donor_ID, Matrix, Freeze_Thaw_Cycle, Protein_Name) %>%
-  summarise(Log_Concentration = mean(Log_Concentration, na.rm = TRUE), .groups = "drop") %>%
+  group_by(Donor_ID, Matrix, Freeze_Thaw, Analyte) %>%
+  summarise(
+    Log_Concentration = mean(Log_Concentration, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
   pivot_wider(
-    names_from = Protein_Name,
+    names_from = Analyte,
     values_from = Log_Concentration
-  )
+  ) %>%
+  janitor::clean_names()
 
-# Keep matrix label + cytokine features
+# Prepare ML dataset
 model_data <- wide_data %>%
-  select(-Donor_ID, -Freeze_Thaw_Cycle)
+  rename(Matrix = matrix) %>%
+  select(-donor_id, -freeze_thaw) %>%
+  mutate(Matrix = as.factor(Matrix))
 
-# Remove cytokines with too much missing data
-missing_rate <- colMeans(is.na(model_data %>% select(-Matrix)))
-keep_features <- names(missing_rate[missing_rate < 0.5])
+# Remove missing values
+model_data <- na.omit(model_data)
 
-model_data <- model_data %>%
-  select(Matrix, all_of(keep_features))
-
-# Impute remaining missing values with feature medians
-model_data <- model_data %>%
-  mutate(across(
-    where(is.numeric),
-    ~ ifelse(is.na(.), median(., na.rm = TRUE), .)
-  ))
-
+# Show matrix class balance
 print("Matrix class counts:")
 print(table(model_data$Matrix))
 
@@ -60,14 +64,14 @@ set.seed(123)
 
 train_index <- createDataPartition(
   model_data$Matrix,
-  p = 0.75,
+  p = 0.8,
   list = FALSE
 )
 
 train_data <- model_data[train_index, ]
-test_data <- model_data[-train_index, ]
+test_data  <- model_data[-train_index, ]
 
-# Random forest model
+# Train random forest classifier
 rf_model <- randomForest(
   Matrix ~ .,
   data = train_data,
@@ -75,32 +79,48 @@ rf_model <- randomForest(
   ntree = 500
 )
 
-# Evaluate model
-predictions <- predict(rf_model, test_data)
-
-print("Confusion matrix:")
-print(confusionMatrix(predictions, test_data$Matrix))
-
-print("Random forest model:")
+# Print model summary
 print(rf_model)
 
-# Save feature importance plot
-png("figures/matrix_prediction_feature_importance.png",
-    width = 1200,
-    height = 900)
+# Generate predictions
+predictions <- predict(rf_model, test_data)
 
-varImpPlot(rf_model, main = "Feature Importance for Matrix Prediction")
+# Evaluate model
+conf_matrix <- confusionMatrix(
+  predictions,
+  test_data$Matrix
+)
+
+print(conf_matrix)
+
+# Feature importance
+importance_df <- importance(rf_model)
+
+print(importance_df)
+
+# Save feature importance plot
+png(
+  "figures/matrix_prediction_feature_importance.png",
+  width = 1200,
+  height = 800
+)
+
+varImpPlot(
+  rf_model,
+  main = "Random Forest Feature Importance"
+)
 
 dev.off()
 
-# Save predictions
-prediction_results <- tibble(
-  Actual_Matrix = test_data$Matrix,
-  Predicted_Matrix = predictions
+# Save prediction outputs
+prediction_results <- data.frame(
+  Actual = test_data$Matrix,
+  Predicted = predictions
 )
 
-write_csv(prediction_results, "results/matrix_prediction_results.csv")
+write_csv(
+  prediction_results,
+  "results/matrix_prediction_results.csv"
+)
 
-print("Saved outputs:")
-print("figures/matrix_prediction_feature_importance.png")
-print("results/matrix_prediction_results.csv")
+print("Model completed successfully.")
