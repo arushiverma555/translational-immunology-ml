@@ -95,3 +95,16 @@ Planned extensions include:
 - feature importance analysis
 - predictive modeling of cytokine stability across sample conditions
 - clustering-based immune phenotype discovery
+
+---
+
+## Exploratory Machine Learning Extension
+
+An exploratory random forest classifier was implemented to investigate whether cytokine slope behavior and matrix-interaction metrics could distinguish cytokine stability classes.
+
+Feature importance analysis identified matrix interaction p-values and matrix-specific slope features as major contributors to classification performance.
+
+Outputs include:
+- random forest feature importance visualization
+- cytokine stability classification framework
+- matrix-specific predictive feature analysis
